@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SL &amp; quantity calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E9EEF3; --panel:#F8FAFC; --ink:#17283A; --muted:#5B6B7C; --line:#C9D3DD;
+  --buy:#1D7446; --sell:#B02A22; --accent:#2B5C8A;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#101923; --panel:#172431; --ink:#E4EBF2; --muted:#93A3B4; --line:#2B3B4C;
+    --buy:#4FC585; --sell:#F0766C; --accent:#79AEE0;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#101923; --panel:#172431; --ink:#E4EBF2; --muted:#93A3B4; --line:#2B3B4C;
+  --buy:#4FC585; --sell:#F0766C; --accent:#79AEE0;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-variant-numeric:tabular-nums;line-height:1.45}
+main{max-width:560px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.35rem;font-weight:600;margin:4px 0 2px}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 18px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{display:block;font-size:.82rem;color:var(--muted);margin-bottom:4px}
+input,select{width:100%;font:inherit;font-size:1.05rem;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:6px;padding:10px 10px}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+.full{grid-column:1/-1}
+.hint{font-size:.76rem;color:var(--muted);margin-top:3px}
+section{margin-top:22px}
+h2{font-size:1rem;font-weight:600;margin:0 0 8px}
+.qty{display:flex;align-items:baseline;gap:10px;padding:14px 0;border-top:2px solid var(--ink);border-bottom:1px solid var(--line)}
+.qty b{font-size:2.6rem;font-weight:600;line-height:1}
+.qty span{color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+td{padding:9px 0;border-bottom:1px solid var(--line);font-size:.95rem}
+td:last-child{text-align:right;font-weight:500}
+.buy{color:var(--buy)} .sell{color:var(--sell)}
+.ladder{position:relative;height:240px;margin:8px 0 0;border-left:2px solid var(--line);margin-left:6px}
+.rung{position:absolute;left:0;right:0;display:flex;justify-content:space-between;align-items:center;
+  transform:translateY(-50%);font-size:.85rem;padding-left:12px}
+.rung::before{content:"";position:absolute;left:-7px;width:12px;height:12px;border-radius:50%;background:currentColor}
+.rung em{font-style:normal;color:var(--muted)}
+.warn{font-size:.82rem;color:var(--muted);margin-top:18px;border-left:3px solid var(--sell);padding-left:10px}
+.err{color:var(--sell);font-weight:500;padding:12px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Stop-loss &amp; quantity</h1>
+  <p class="sub">MIS long entry sizing, 1% SL, 1% and 2% targets, rounded to NSE tick.</p>
+
+  <div class="grid">
+    <div><label for="price">Order price (₹)</label><input id="price" type="number" inputmode="decimal" step="any" value="170"></div>
+    <div><label for="fill">Actual fill price (₹)</label><input id="fill" type="number" inputmode="decimal" step="any" placeholder="Same as order"><div class="hint">Leave blank if unfilled</div></div>
+    <div><label for="cap">Capital (₹)</label><input id="cap" type="number" inputmode="decimal" value="20000"></div>
+    <div><label for="lev">Leverage (×)</label><input id="lev" type="number" inputmode="decimal" step="any" value="5"></div>
+    <div><label for="slp">Stop-loss %</label><input id="slp" type="number" inputmode="decimal" step="any" value="1"></div>
+    <div><label for="gap">Limit gap (ticks)</label><input id="gap" type="number" inputmode="numeric" value="10"></div>
+    <div><label for="tick">Tick size</label>
+      <select id="tick">
+        <option value="auto">Auto (NSE band)</option>
+        <option>0.01</option><option>0.05</option><option>0.10</option>
+        <option>0.50</option><option>1.00</option><option>5.00</option>
+      </select></div>
+    <div><label for="tgp1">Target 1 %</label><input id="tgp1" type="number" inputmode="decimal" step="any" value="1"></div>
+    <div><label for="tgp2">Target 2 %</label><input id="tgp2" type="number" inputmode="decimal" step="any" value="2"></div>
+    <div><label for="tp">Target profit (₹)</label><input id="tp" type="number" inputmode="decimal" placeholder="Optional"><div class="hint">Adds a third target</div></div>
+  </div>
+
+  <div id="out"></div>
+
+  <p class="warn">Check the instrument's actual tick size in Kite if an order is rejected. Zerodha may give some stocks less than 5× leverage, so real margin can be higher. MIS is squared off around 3:20 PM.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const num = id => parseFloat($(id).value);
+const inr = v => "₹" + v.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function autoTick(p){
+  if(p < 250) return 0.01;
+  if(p < 1000) return 0.05;
+  if(p < 5000) return 0.10;
+  if(p < 10000) return 0.50;
+  if(p < 20000) return 1.00;
+  return 5.00;
+}
+// integer-tick math to avoid float drift
+const T = (v,t,mode) => { const x = v/t; return mode==="up" ? Math.ceil(x-1e-9) : mode==="down" ? Math.floor(x+1e-9) : Math.round(x); };
+const P = (n,t) => +(n*t).toFixed(2);
+
+function calc(){
+  const out = $("out");
+  const price = num("price"), cap = num("cap"), lev = num("lev");
+  const slp = num("slp") || 0, gap = Math.max(0, Math.round(num("gap") || 0));
+  if(!(price>0) || !(cap>0) || !(lev>0)){ out.innerHTML = '<p class="err">Enter a price, capital and leverage above zero.</p>'; return; }
+
+  const exposure = cap*lev;
+  const qty = Math.floor(exposure/price);
+  if(qty < 1){ out.innerHTML = `<p class="err">Price exceeds ${inr(exposure)} trading exposure.</p>`; return; }
+
+  const fillRaw = num("fill");
+  const entry = fillRaw>0 ? fillRaw : price;
+  const tick = $("tick").value==="auto" ? autoTick(entry) : parseFloat($("tick").value);
+  const priceOnTick = Math.abs(price/tick - Math.round(price/tick)) < 1e-6;
+
+  const trigN = T(entry*(1-slp/100), tick);
+  const trig = P(trigN,tick), lim = P(trigN-gap,tick);
+  const costTrig = P(T(entry,tick),tick), costLim = P(T(entry,tick)-gap,tick);
+  const used = qty*price;
+
+  const tp = num("tp"), tg1 = num("tgp1"), tg2 = num("tgp2");
+  const targets = [];
+  if(tg1>0) targets.push({k:`Target ${tg1}%`, v:P(T(entry*(1+tg1/100), tick, "up"), tick)});
+  if(tg2>0) targets.push({k:`Target ${tg2}%`, v:P(T(entry*(1+tg2/100), tick, "up"), tick)});
+  if(tp>0) targets.push({k:`Target ${inr(tp)}`, v:P(T(entry + tp/qty, tick, "up"), tick)});
+
+  const riskTrig = (entry-trig)*qty, riskLim = (entry-lim)*qty;
+
+  // ladder positions
+  const pts = [{k:"Entry",v:entry,c:"buy"},{k:"SL trigger",v:trig,c:"sell"},{k:"SL limit",v:lim,c:"sell"}];
+  targets.forEach(t=>pts.unshift({k:t.k,v:t.v,c:"buy"}));
+  const hi = Math.max(...pts.map(p=>p.v)), lo = Math.min(...pts.map(p=>p.v)), span = (hi-lo)||1;
+  const ladder = pts.map(p=>`<div class="rung ${p.c}" style="top:${8+84*(hi-p.v)/span}%"><span>${p.k}</span><em>${inr(p.v)}</em></div>`).join("");
+
+  out.innerHTML = `
+  <section>
+    <div class="qty"><b>${qty.toLocaleString("en-IN")}</b><span>shares · ${inr(used)} of ${inr(exposure)} exposure</span></div>
+    <table>
+      <tr><td>Margin needed at ${lev}×</td><td>${inr(used/lev)}</td></tr>
+      <tr><td>Tick size used</td><td>${tick.toFixed(2)}${priceOnTick?"":' <span class="sell">(order price not on tick)</span>'}</td></tr>
+    </table>
+  </section>
+  <section>
+    <h2>Stop-loss order (SELL, SL, MIS)</h2>
+    <table>
+      <tr><td>Based on entry</td><td>${inr(entry)}${fillRaw>0?"":' <span style="color:var(--muted);font-weight:400">(order price)</span>'}</td></tr>
+      <tr><td>Trigger price</td><td class="sell">${inr(trig)}</td></tr>
+      <tr><td>Limit price</td><td class="sell">${inr(lim)}</td></tr>
+      <tr><td>Loss if filled at trigger</td><td>${inr(riskTrig)}</td></tr>
+      <tr><td>Loss if filled at limit</td><td>${inr(riskLim)}</td></tr>
+    </table>
+    <div class="ladder" aria-hidden="true">${ladder}</div>
+  </section>
+  ${targets.length ? `<section>
+    <h2>Targets (SELL LIMIT, full qty)</h2>
+    <table>
+      ${targets.map(t=>`<tr><td>${t.k}: ${inr(t.v)}</td><td class="buy">+${inr((t.v-entry)*qty)}${riskTrig>0?` <span style="color:var(--muted);font-weight:400">(${((t.v-entry)/(entry-trig)).toFixed(1)}R)</span>`:""}</td></tr>`).join("")}
+    </table>
+  </section>` : ""}
+  <section>
+    <h2>Trail SL to cost</h2>
+    <table>
+      <tr><td>New trigger</td><td>${inr(costTrig)}</td></tr>
+      <tr><td>New limit</td><td>${inr(costLim)}</td></tr>
+    </table>
+  </section>`;
+}
+// Remember the last capital entered
+try{
+  const saved = localStorage.getItem("lastCapital");
+  if(saved && parseFloat(saved) > 0) $("cap").value = saved;
+}catch(e){}
+$("cap").addEventListener("input",()=>{
+  const v = $("cap").value;
+  try{ if(parseFloat(v) > 0) localStorage.setItem("lastCapital", v); }catch(e){}
+});
+
+document.querySelectorAll("input,select").forEach(el=>el.addEventListener("input",calc));
+calc();
+</script>
+</body>
+</html>
